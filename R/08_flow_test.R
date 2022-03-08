@@ -144,7 +144,7 @@ library(%s)
         if(!failed_only || !success) {
         #success <- if(success) "passed" else "failed"
 
-        chunk_code <- paste(styler::style_text(deparse(call)), collapse = "\n")
+        chunk_code <- paste(styler::style_text(robust_deparse(call)), collapse = "\n")
         desc <- eval(match.call(testthat::test_that, call)[["desc"]], e)
 
         if(success) {
@@ -250,5 +250,5 @@ eval_silent <- function(call, env = parent.frame()) {
     sink(type = "output")
     sink(type = "message")
   })
-  suppressWarnings(eval(call, env))
+  suppressWarnings(!inherits(try(eval(call, env), silent = TRUE), "try-error"))
 }

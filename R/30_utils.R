@@ -62,6 +62,24 @@ get_last_id <- function(data) {
   max(data$nodes$id)
 }
 
+deparse1 <- function (expr, collapse = " ", width.cutoff = 500L, ...)
+  paste(deparse(expr, width.cutoff, ...), collapse = collapse)
+
+str2lang <- function(s) {
+  parse(text=s)[[1]]
+}
+
+trimws <- function (x, which = c("both", "left", "right"), whitespace = "[ \t\r\n]") {
+  which <- match.arg(which)
+  mysub <- function(re, x) sub(re, "", x, perl = TRUE)
+  switch(
+    which,
+    left = mysub(paste0("^", whitespace, "+"),x),
+    right = mysub(paste0(whitespace, "+$"), x),
+    both = mysub(paste0(whitespace, "+$"), mysub(paste0("^", whitespace, "+"), x))
+  )
+}
+
 # deparse2 <- function(x){
 #   x <- as.call(c(quote(`{`),x))
 #   x <- deparse(x, width.cutoff = 500)
@@ -72,7 +90,7 @@ get_last_id <- function(data) {
 
 `%call_in%` <- function(calls, constructs){
   sapply(as.list(calls), function(x)
-    is.call(x) && as.character(x[[1]]) %in% constructs)
+    is.call(x) && deparse1(x[[1]]) %in% constructs)
 }
 
 get_last_call_type <- function(expr){
@@ -221,3 +239,118 @@ getS3methodSym <- function(fun, x){
 }
 
 gfn <- getFromNamespace
+
+
+robust_deparse <- function(call) {
+  txt <- paste(deparse(call, width.cutoff = 40L, backtick = TRUE), collapse = "\n")
+  if (!grepl("\\$!!", txt)) return(txt)
+  # replace
+  substitute_bad_dollars <- function(call) {
+    if(!is.call(call)) return(call)
+    if(length(call) == 3 && identical(call[[1]], quote(`$`))) {
+      if(!is.character(call[[3]])) {
+        call[[1]] <- as.symbol("$\b")
+      }
+    }
+    call <- as.call(lapply(as.list(call), substitute_bad_dollars))
+    call
+  }
+  call <- substitute_bad_dollars(call)
+  txt <- paste(deparse(call, width.cutoff = 40L, backtick = TRUE), collapse = "\n")
+  gsub("`\\$\\\\b`", "`$`", txt)
+}
+
+escape_pipes_and_brackets <- function(x) {
+  x <- gsub("]","\\]", x ,fixed = TRUE)
+  x <- gsub("[","\\[", x ,fixed = TRUE)
+  x <- gsub("|","\\|", x ,fixed = TRUE)
+  x
+}
+
+quote_non_syntactic <- function(x) {
+  ifelse(x == make.names(x), x, paste0("`", x, "`"))
+}
+
+get_binding_environment <- function(fun_name, env = parent.frame()) {
+  if (identical(env, emptyenv())) {
+    stop("Can't find `", fun_name, "`.", call. = FALSE)
+  } else if (exists(fun_name, env, inherits = FALSE)) {
+    env
+  } else {
+    get_binding_environment(fun_name, parent.env(env))
+  }
+}
+
+namespace_name <- function(x, ...) UseMethod("namespace_name")
+
+#' @export
+namespace_name.environment <- function(x, env, ...) {
+  if(identical(x, globalenv())) return("R_GlobalEnv")
+  if(!isNamespace(x)) stop("The provided environment isn't a namespace")
+  sub("^namespace:", "", environmentName(x))
+}
+
+#' @export
+namespace_name.character <- function(x, env, fallback_ns = NULL, fail_if_not_found = TRUE) {
+
+  if(grepl("::", x)) {
+    return(sub("^([^:]+)[:]{1,2}.*", "\\1", x))
+  }
+
+
+  # since function's environment is not necessarily its namespace we need to go up
+  if (!exists(x, envir = env, inherits = TRUE)) {
+    if(!is.null(fallback_ns) && exists(x, envir = fallback_ns, inherits = FALSE))
+      return(namespace_name(fallback_ns))
+    if(fail_if_not_found)
+      stop(sprintf("`%s` cannot be found", x))
+    else
+      return(NA)
+  }
+  # handle primitives
+  if(is.null(environment(get(x, env)))) return("base")
+
+  bind_env <- get_binding_environment(x, env)
+  bind_env_nm <- environmentName(bind_env)
+  if(startsWith(bind_env_nm, "imports:")) {
+    parent_ns <- sub("^.*?:", "", bind_env_nm)
+    imports <- getNamespaceImports(parent_ns)
+    pkgs <- names(Filter(function (funs) x %in% funs, imports))
+    namespace_name <- pkgs[length(pkgs)] # or pkgs[1] ? not sure
+  } else if(startsWith(bind_env_nm, "package:")) {
+    namespace_name <- sub("^.*?:", "", bind_env_nm)
+  } else if (bind_env_nm == "base") {
+    namespace_name <- "base"
+  } else if (bind_env_nm == "") {
+    # an anonymous closure environment
+    # FIXME: deal with those cleanly, should be hidden from diagram
+    namespace_name <- "" # capture.output(bind_env)
+  } else {
+    namespace_name <- namespace_name(bind_env)
+  }
+
+  namespace_name
+}
+
+get_namespace_exports <- function(ns) {
+  if (identical(ns, globalenv())) return(ls(globalenv()))
+  if(!file.exists("DESCRIPTION")) return(getNamespaceExports(ns))
+  current_pkg <- sub("^Package: (.*)$", "\\1", readLines("DESCRIPTION")[[1]])
+  if(is.environment(ns)) ns <- sub("^namespace:", "", environmentName(ns))
+  if(ns != current_pkg) return(getNamespaceExports(ns))
+  ns_lines <- readLines("NAMESPACE")
+  pattern <- "^export\\((.*)\\)$"
+  sub(pattern, "\\1", ns_lines)[grepl(pattern, ns_lines)]
+}
+
+is_namespaced <- function(call) {
+  is.call(call) &&
+    length(call) == 3 &&
+    deparse1(call[[1]]) %in% c("::", ":::")
+}
+
+raw_fun_name <- function(call) {
+  if(is_namespaced(call)) call <- call[[3]]
+  if(length(call) > 1) stop("invalid name")
+  as.character(call)
+}

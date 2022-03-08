@@ -7,12 +7,16 @@ add_data_from_for_block <- function(data, block, narrow = FALSE){
   id_end <- -id
   # add node for `for` statement
 
-  code_str <- paste(deparse(call("for", block[[2]], block[[3]]), width.cutoff = 40L, backtick = TRUE), collapse = "\n")
+  code_str <- robust_deparse(call("for", block[[2]], block[[3]]))
   code_str <- styler::style_text(code_str)
   code_str[length(code_str)] <- sub(" NULL$","", code_str[length(code_str)])
-  if(length(code_str) == 1) code_str <- c(code_str, "\u2800")
-  code_str <- paste("\u2800", code_str, "\u2800", collapse = "\n")
-  code_str <- sub(" \\{ \u2800\\n\u2800   NULL \u2800\\n\u2800 \\} \u2800", "", code_str)
+  indenter <- getOption("flow.indenter")
+  if(length(code_str) == 1) code_str <- c(code_str, indenter)
+  code_str <- paste(indenter, code_str, indenter, collapse = "\n")
+  code_str <- sub(sprintf(
+    " \\{ %s\\n%s   NULL %s\\n%s \\} %s",
+    indenter, indenter, indenter, indenter, indenter),
+    "", code_str)
 
   data <- add_node(
     data,
