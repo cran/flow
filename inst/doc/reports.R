@@ -4,7 +4,3 @@ knitr::opts_chunk$set(
   comment = "#>"
 )
 
-## ---- eval = FALSE------------------------------------------------------------
-#  library(flow)
-#  flow_doc(prefix = "##")
-

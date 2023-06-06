@@ -6,9 +6,9 @@
 \alias{flow-package}
 \title{flow: View and Browse Code Using Flow Diagrams}
 \description{
-\if{html}{\figure{logo.png}{options: align='right' alt='logo' width='120'}}
+\if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Visualize as flow diagrams the logic of functions, expressions or scripts in a static way or when running a call, and ease debugging. Advanced features include analogs to 'debug' and 'debugonce' to target specific functions to draw, an utility to draw the calls used in the tests of the package in a markdown report, and an utility to draw all the functions of one package in a markdown report.
+Visualize as flow diagrams the logic of functions, expressions or scripts in a static way or when running a call, visualize the dependencies between functions or between modules in a shiny app, and more.
 }
 \seealso{
 Useful links:

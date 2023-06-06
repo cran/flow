@@ -4,12 +4,13 @@ knitr::opts_chunk$set(
   comment = "#>"
 )
 
-## -----------------------------------------------------------------------------
-library(flow)
-flow_view(bquote)
+## ---- eval = FALSE------------------------------------------------------------
+#  library(flow)
+#  flow_view(bquote)
 
-## -----------------------------------------------------------------------------
-flow_view(bquote, nested_fun = "unquote")
+## ---- eval = FALSE------------------------------------------------------------
+#  flow_view(bquote, nested_fun = "unquote")
 
-flow_view(bquote, nested_fun = 3)
+## ---- eval = FALSE------------------------------------------------------------
+#  flow_view(bquote, nested_fun = 3)
 

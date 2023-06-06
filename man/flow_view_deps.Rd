@@ -13,13 +13,15 @@ flow_view_deps(
   hide = NULL,
   show_imports = c("functions", "packages", "none"),
   out = NULL,
-  lines = TRUE
+  lines = TRUE,
+  include_formals = TRUE
 )
 }
 \arguments{
 \item{fun}{A function, can be of the form \code{fun}, \code{pkg::fun}, \code{pkg:::fun},
 if in the form \code{fun}, the binding should be located in a package namespace
-or the global environment}
+or the global environment. It can also be a named list of functions, such as
+one you'd create with \code{dplyr::lst()}, for instance \code{lst(fun1, pkg::fun2)}.}
 
 \item{max_depth}{An integer, the maximum depth to display}
 
@@ -39,13 +41,33 @@ export the object to a temp file of the relevant format and open it,
 if a regular path is used the format will be guessed from the extension.}
 
 \item{lines}{Whether to show the number of lines of code next to the function name}
+
+\item{include_formals}{Whether to fetch dependencies in the default values of the
+function's arguments}
+}
+\value{
+\code{flow_view_deps()} returns a \code{"flow_diagram"} object by default, and the output path invisibly if \code{out} is not
+\code{NULL} (called for side effects).
 }
 \description{
 \ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
 }
 \details{
-Exported functions are shown in blue, unexported functions are shown in yellow.
+Exported objects are shown in blue, unexported objects are shown in yellow.
+
+Regular expressions can be used in \code{trim}, \code{promote}, \code{demote} and \code{hide},
+they will be used on function names in the form \code{pkg::fun} or \code{pkg:::fun}
+where \code{pkg} can be any package mentioned in these arguments, the namespace
+of the explored function, or any of the direct dependencies of the package.
+These arguments must be named, using the name "pattern". See examples below.
 }
 \examples{
-flow_view_deps(flow_view_deps)
+flow_view_deps(here::i_am)
+flow_view_deps(here::i_am, demote = "format_dr_here")
+flow_view_deps(here::i_am, trim = "format_dr_here")
+flow_view_deps(here::i_am, hide = "format_dr_here")
+flow_view_deps(here::i_am, promote = "rprojroot::get_root_desc")
+flow_view_deps(here::i_am, promote = c(pattern = ".*::g"))
+flow_view_deps(here::i_am, promote = c(pattern = "rprojroot::.*"))
+flow_view_deps(here::i_am, hide = c(pattern = "here:::s"))
 }

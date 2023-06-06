@@ -1,16 +1,22 @@
 #  TODO: max depth should be applied on min depth where fun is found, else inconsistent ouput
 # as object can have several depths and here first found is taken
 
-
 #' Show dependency graph of a function
 #'
-#' Exported functions are shown in blue, unexported functions are shown in yellow.
+#' Exported objects are shown in blue, unexported objects are shown in yellow.
+#'
+#' Regular expressions can be used in `trim`, `promote`, `demote` and `hide`,
+#' they will be used on function names in the form `pkg::fun` or `pkg:::fun`
+#' where `pkg` can be any package mentioned in these arguments, the namespace
+#' of the explored function, or any of the direct dependencies of the package.
+#' These arguments must be named, using the name "pattern". See examples below.
 #'
 #' @description
 #' `r lifecycle::badge("experimental")`
 #' @param fun A function, can be of the form `fun`, `pkg::fun`, `pkg:::fun`,
 #'   if in the form `fun`, the binding should be located in a package namespace
-#'   or the global environment
+#'   or the global environment. It can also be a named list of functions, such as
+#'   one you'd create with `dplyr::lst()`, for instance `lst(fun1, pkg::fun2)`.
 #' @param max_depth An integer, the maximum depth to display
 #' @param trim A vector or list of function names where the recursion will stop
 #' @param promote A vector or list of external functions to show as internal functions
@@ -18,9 +24,20 @@
 #' @param hide A vector or list of internal functions to completely remove from the chart
 #' @param show_imports Whether to show imported "functions", only "packages", or "none"
 #' @param lines Whether to show the number of lines of code next to the function name
+#' @param include_formals Whether to fetch dependencies in the default values of the
+#'   function's arguments
 #' @inheritParams flow_view
+#' @return `flow_view_deps()` returns a `"flow_diagram"` object by default, and the output path invisibly if `out` is not
+#' `NULL` (called for side effects).
 #' @examples
-#' flow_view_deps(flow_view_deps)
+#' flow_view_deps(here::i_am)
+#' flow_view_deps(here::i_am, demote = "format_dr_here")
+#' flow_view_deps(here::i_am, trim = "format_dr_here")
+#' flow_view_deps(here::i_am, hide = "format_dr_here")
+#' flow_view_deps(here::i_am, promote = "rprojroot::get_root_desc")
+#' flow_view_deps(here::i_am, promote = c(pattern = ".*::g"))
+#' flow_view_deps(here::i_am, promote = c(pattern = "rprojroot::.*"))
+#' flow_view_deps(here::i_am, hide = c(pattern = "here:::s"))
 #' @export
 flow_view_deps <- function(
   fun,
@@ -31,34 +48,43 @@ flow_view_deps <- function(
   hide = NULL,
   show_imports = c("functions", "packages", "none"),
   out = NULL,
-  lines = TRUE) {
-
-  target_fun_name <- deparse(substitute(fun)) #
+  lines = TRUE,
+  include_formals = TRUE) {
+  fun_lng <- substitute(fun)
   call_env <- parent.frame()
-  nm <- raw_fun_name(substitute(fun))
 
-  objs <- flow_view_deps_df(target_fun_name, trim, promote, demote, hide, lines, call_env)
+  if (is.list(fun)) {
+    objs <- Map(flow_view_deps_df, names(fun), fun, MoreArgs = list(trim, promote, demote, hide, lines, default_env = call_env))
+    objs <- do.call(rbind, objs)
+    objs <- unique(objs)
+  } else {
+    target_fun_name <- deparse(fun_lng)
+    nm <- raw_fun_name(fun_lng)
+    # A data frame with all potentially relevant functions + info
+    objs <- flow_view_deps_df(target_fun_name, fun, trim, promote, demote, hide, lines, default_env = call_env)
+  }
 
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   # initiate global objects
 
   show_imports <- match.arg(show_imports)
 
-  nomnoml_code <- "
-# direction: right
-#.expfun: visual=roundrect fill=#ddebf7 title=bold
-#.unexpfun: visual=roundrect fill=#fff2cc title=bold
-#.trimmed: visual=roundrect fill=#fce4d6 dashed title=bold
-#.expdata: visual=database fill=#e2efda title=bold
-#.unexpdata: visual=database fill=#fff2cc title=bold
-#.callroutine: visual=transceiver fill=#ededed
-"
+  nomnoml_setup <- c(
+    "# direction: right",
+    "#.expfun: visual=roundrect fill=#ddebf7 title=bold",
+    "#.unexpfun: visual=roundrect fill=#fff2cc title=bold",
+    "#.trimmed: visual=roundrect fill=#fce4d6 dashed title=bold",
+    "#.expdata: visual=database fill=#e2efda title=bold",
+    "#.unexpdata: visual=database fill=#fff2cc title=bold",
+    "#.callroutine: visual=transceiver fill=#ededed"
+  )
+  nomnoml_data_rows <- list()
 
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   # recurse
   # we don't pass around nomnoml_code and objs, we just edit it with `<<-`
   rec <- function(row, depth = 1, parent = NULL) {
-    dependency_df <- get_dependency_df(row, objs)
+    dependency_df <- get_dependency_df(row, objs, include_formals)
     # gather info from obs
 
     if(NROW(dependency_df)) {
@@ -95,7 +121,15 @@ flow_view_deps <- function(
     if(!is.null(parent)) {
       new_nomnoml_code <- paste0("[<", parent$style, "> ", parent$header, "] -> ", new_nomnoml_code)
     }
-    nomnoml_code <<- paste0(nomnoml_code, "\n", new_nomnoml_code)
+
+    nomnoml_data_rows[[length(nomnoml_data_rows) + 1]] <<- list(
+      child_header = row$header,
+      external_ref = external_ref,
+      child_style = style,
+      parent_header = parent$header %||% NA_character_,
+      parent_style = parent$style %||% NA_character_,
+      code = new_nomnoml_code
+    )
 
     # update "covered status"
     row_ind <- objs$ns_nm == row$ns_nm & objs$nm == row$nm
@@ -108,27 +142,44 @@ flow_view_deps <- function(
         rec(internal_ref_df[i,, drop = FALSE], depth + 1, parent = row)
       }
     }
-
   }
-  #debug(rec)
 
-  target_nm <- sub("^[^:]+[:]{2,3}`?([^`]+)`?", "\\1", target_fun_name)
-  target_ns_nm <- namespace_name(target_fun_name, parent.frame())
-  rec (objs[objs$nm == target_nm & objs$ns_nm == target_ns_nm,, drop = FALSE])
+  if (!is.list(fun)) {
+    target_nm <- sub("^[^:]+[:]{2,3}`?([^`]+)`?", "\\1", target_fun_name)
+    target_ns_nm <- namespace_name(target_fun_name, parent.frame())
+    rec (objs[objs$nm == target_nm & objs$ns_nm == target_ns_nm,, drop = FALSE])
+  } else {
+    for (target_fun_name in names(fun)) {
+      target_nm <- sub("^[^:]+[:]{2,3}`?([^`]+)`?", "\\1", target_fun_name)
+      target_ns_nm <- namespace_name(target_fun_name, parent.frame())
+      rec (objs[objs$nm == target_nm & objs$ns_nm == target_ns_nm,, drop = FALSE])
+    }
+  }
 
-  svg <- is.null(out) || endsWith(out, ".html") || endsWith(out, ".htm")
-  out <- save_nomnoml(nomnoml_code, svg, out)
-  if(inherits(out, "htmlwidget")) out else invisible(out)
+  nomnoml_data <- as.data.frame(do.call(rbind, nomnoml_data_rows))
+  nomnoml_data$external_ref <- as.list(nomnoml_data$external_ref)
+  if (identical(out, "data")) return(nomnoml_data)
+
+  nomnoml_code <- paste(c(nomnoml_setup, nomnoml_data$code), collapse = "\n")
+  if (identical(out, "code")) return(nomnoml_code)
+
+  out <- save_nomnoml(nomnoml_code, out)
+  if(inherits(out, "htmlwidget")) as_flow_diagram(out, data = nomnoml_data, code = nomnoml_code)  else invisible(out)
 }
 
-
-flow_view_deps_df <- function(target_fun_name,trim, promote, demote, hide, lines, default_env) {
+# A data frame containing all functions from all namespaces found in functions mentionned
+# in target_fun_name,trim, promote, demote, hide
+# ns_nm: namespace name
+# nm: function name
+# exported, is_function, is_call_routine
+# style: a label for the style to apply with nomnoml (expfun, unexpfun etc)
+# n_lines
+# trim, promote, demote, hide,
+# covered: whether we already defined the node
+# in_target_ns: Whether the object is bound in the same
+# header: the label of the node
+flow_view_deps_df <- function(target_fun_name, target_fun, trim, promote, demote, hide, lines, default_env) {
   # make a data.frame with every fun from every namespace
-  target_fun <- eval(str2lang(target_fun_name), default_env)
-  # FIXME: the functions's environment is not necesserily where we find its binding
-  # edge cases are rare, but I believe purrr or tidyselect have functions generated by factories
-  # and these have for environment a chile of the namespace
-  #target_ns  <- environment(target_fun)
 
   fallback_ns_nm <- namespace_name(target_fun_name, default_env)
   if(fallback_ns_nm == "R_GlobalEnv") {
@@ -136,16 +187,20 @@ flow_view_deps_df <- function(target_fun_name,trim, promote, demote, hide, lines
   } else {
     fallback_ns <- asNamespace(fallback_ns_nm)
   }
-  funs_raw <- unique(c(target_fun_name, trim, promote, demote, hide))
+  edit0 <- list(trim = trim, promote = promote, demote = demote, hide = hide)
+  patterns <- lapply(edit0, function(x) x[names(x) == "pattern"])
+  edit <- lapply(edit0, function(x) if(is.null(names(x))) x else x[names(x) == ""])
+
+  funs_raw <- unique(c(target_fun_name, unlist(edit)))
   namespaced_funs_lgl <- grepl("::", funs_raw)
   obj_names <- sub("^[^:]+[:]{2,3}`?([^`]+)`?", "\\1", funs_raw)
   namespaces <- sapply(funs_raw, namespace_name, default_env, fallback_ns, USE.NAMES = FALSE)
 
+  all_pkgs <- unique(c(namespaces, deps(fallback_ns_nm)))
   objs <- do.call(
     rbind,
-    lapply(unique(namespaces), get_ns_obj_df, lines = lines)
+    lapply(all_pkgs, get_ns_obj_df, lines = lines)
   )
-  edit <- list(trim = trim, promote = promote, demote = demote, hide = hide)
   edit_df <- data.frame(
     ns_nm = namespaces[-1],
     nm = obj_names[-1],
@@ -171,6 +226,25 @@ flow_view_deps_df <- function(target_fun_name,trim, promote, demote, hide, lines
   objs$promote <- !is.na(objs$promote)
   objs$demote  <- !is.na(objs$demote)
   objs$hide    <- !is.na(objs$hide)
+
+  full_nms <- sprintf("%s%s%s", objs$ns_nm, ifelse(startsWith(objs$style, "unexp"), ":::", "::"), objs$nm)
+  for (pattern in patterns$trim) {
+    objs$trim <- objs$trim | grepl(pattern, full_nms) &
+      !objs$promote & !objs$demote & !objs$hide
+  }
+  for (pattern in patterns$promote) {
+    objs$promote <- objs$promote | grepl(pattern, full_nms) &
+      !objs$trim & !objs$demote & !objs$hide
+  }
+  for (pattern in patterns$demote) {
+    objs$demote <- objs$demote | grepl(pattern, full_nms) &
+      !objs$trim & !objs$promote & !objs$hide
+  }
+  for (pattern in patterns$hide) {
+    objs$hide <- objs$hide | grepl(pattern, full_nms) &
+      !objs$trim & !objs$promote & !objs$demote
+  }
+
   objs$covered <- objs$trim
 
   objs$in_target_ns <- objs$ns_nm == fallback_ns_nm
@@ -191,8 +265,15 @@ flow_view_deps_df <- function(target_fun_name,trim, promote, demote, hide, lines
   objs
 }
 
-get_ns_obj_df <- function(ns_nm, lines) {
+deps <- function(pkg) {
+  desc <- read.dcf(system.file("DESCRIPTION", package = pkg))
+  desc <- desc[,intersect(c("Imports", "Depends"), colnames(desc))]
+  setdiff(trimws(unique(unlist(
+    strsplit(gsub("\\(.*?\\)", "", desc), "\\s?,\\s?")
+  ))), c("R", NA))
+}
 
+get_ns_obj_df <- function(ns_nm, lines) {
   if (ns_nm == "R_GlobalEnv") {
     ns <- globalenv()
   } else {
@@ -219,7 +300,7 @@ get_ns_obj_df <- function(ns_nm, lines) {
   objs
 }
 
-get_dependency_df <- function(row, objs) {
+get_dependency_df <- function(row, objs, include_formals) {
   ns_nm <- hide <- NULL # for notes
   if(row$ns_nm == "R_GlobalEnv") {
     obj <- get(row$nm, globalenv())
@@ -227,10 +308,10 @@ get_dependency_df <- function(row, objs) {
     obj <- getFromNamespace(row$nm, row$ns_nm)
   }
   if(!is.function(obj)) return(NULL)
-  namespaced_objs_df <- get_namespaced_objs_df(obj)
-  short_objs_df <- get_short_objs_df(obj)
-  dependency_df <- rbind(namespaced_objs_df, short_objs_df)
-  dependency_df <- subset(dependency_df, ns_nm != "base")
+  namespaced_objs_df <- get_namespaced_objs_df(obj, include_formals)
+  short_objs_df <- get_short_objs_df(obj, include_formals)
+  dependency_df <- unique(rbind(namespaced_objs_df, short_objs_df))
+  dependency_df <- subset(dependency_df, ns_nm != "base" & ns_nm != "")
   dependency_df <- merge(dependency_df, objs, all.x = TRUE)
   dependency_df$hide[is.na(dependency_df$hide)] <- FALSE
   dependency_df <- subset(dependency_df, !hide)
@@ -239,7 +320,7 @@ get_dependency_df <- function(row, objs) {
   dependency_df
 }
 
-get_namespaced_objs_df <- function(obj) {
+get_namespaced_objs_df <- function(obj, include_formals) {
   call <- body(obj)
   extract_namespaced_objs_impl <- function(call) {
     if(!is.call(call)) return(NULL)
@@ -252,6 +333,10 @@ get_namespaced_objs_df <- function(obj) {
     lapply(call, extract_namespaced_objs_impl)
   }
   calls <- extract_namespaced_objs_impl(call)
+  if (include_formals) {
+    calls_from_fmls <- lapply(formals(obj), extract_namespaced_objs_impl)
+    calls <- c(calls, calls_from_fmls)
+  }
   calls <- unlist(calls)
   do.call(rbind, lapply(calls, function (x) data.frame(
     ns_nm = as.character(x[[2]]),
@@ -259,9 +344,14 @@ get_namespaced_objs_df <- function(obj) {
     stringsAsFactors = FALSE)))
 }
 
-get_short_objs_df <- function(obj) {
+get_short_objs_df <- function(obj, include_formals) {
   body_ <- remove_namespaced_calls(body(obj))
-  objs <- setdiff(all.names(body_), c(formalArgs(obj), extract_assignment_targets(body_)))
+  all_nms <- all.names(body_)
+  if (include_formals) {
+    fmls <- lapply(formals(obj), remove_namespaced_calls)
+    all_nms <- unique(unlist(c(all_nms, lapply(fmls, all.names))))
+  }
+  objs <- setdiff(all_nms, c(formalArgs(obj), extract_assignment_targets(body_)))
   namespaces <- sapply(objs, namespace_name, environment(obj), fail_if_not_found = FALSE)
   # NA namespaces are false positives, symbols found in NSE expressions
   # FIXME: We could at least ignore rhs of $ for those because if we have lhs$rhs

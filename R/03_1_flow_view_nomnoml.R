@@ -1,5 +1,5 @@
 flow_view_nomnoml <- function(
-  f_chr, x, prefix, truncate, nested_fun, swap, narrow, code, out, svg,
+  f_chr, x, prefix, truncate, nested_fun, swap, narrow, code, out,
   engine) {
 
   ## build data
@@ -11,14 +11,55 @@ flow_view_nomnoml <- function(
     swap = swap,
     truncate = truncate)
 
+  if(identical(out, "data")) return(data)
+
   ## build code from data
   code <- do.call(build_nomnoml_code, c(list(data,code = code)))
+  class(code) <- "flow_code"
 
-  out <- save_nomnoml(code, svg, out)
-  if(inherits(out, "htmlwidget")) out else invisible(out)
+  if(identical(out, "code")) return(code)
+
+  out <- save_nomnoml(code, out)
+  if(inherits(out, "htmlwidget")) as_flow_diagram(out, data, code) else invisible(out)
 }
 
-save_nomnoml <- function(code, svg, out) {
+as_flow_diagram <- function(widget, data, code) {
+  out <- list(widget = widget, data = data, code = code)
+  class(out) <- "flow_diagram"
+  out
+}
+
+#' @export
+print.flow_diagram <- function(x, ...) {
+  if(isTRUE(getOption('knitr.in.progress'))) {
+    widget <- x$widget
+    widget$x$svg <- FALSE
+    png <- tempfile("flow_", fileext = ".png")
+    html <- tempfile("flow_", fileext = ".html")
+    do.call(htmlwidgets::saveWidget, c(list(widget, html, FALSE)))
+    webshot::webshot(html, png, selector = "canvas")
+    #FIXME: printing should return the input, but couldn't find another way here
+    return(knitr::include_graphics(png))
+  } else {
+    print(x$widget)
+  }
+ invisible(x)
+}
+
+#' @export
+print.flow_code <- function(x, out = NULL, ...) {
+  # FIXME: it would be nice to color the [<foo> ] with block color, and item number in another color
+  #  but not super crucial as this won't be used that much, we might also have an option to describe
+  #  how to deal with the braille character: show, hide, show as UTF8
+  writeLines(x)
+  invisible(x)
+}
+
+save_nomnoml <- function(code, out) {
+  ## set svg to TRUE if flow.svg is TRUE and output to viewer or html
+  svg <- getOption("flow.svg") &&
+    (is.null(out) || out %in% c("htm", "html") || endsWith(out, ".htm") || endsWith(out, ".html"))
+
   ## buildwidget
   x <- list(code = code, svg = svg)
   widget <- do.call(

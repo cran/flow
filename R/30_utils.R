@@ -69,6 +69,10 @@ str2lang <- function(s) {
   parse(text=s)[[1]]
 }
 
+`%||%` <-function (x, y) {
+  if (is.null(x)) y else x
+}
+
 trimws <- function (x, which = c("both", "left", "right"), whitespace = "[ \t\r\n]") {
   which <- match.arg(which)
   mysub <- function(re, x) sub(re, "", x, perl = TRUE)
@@ -121,6 +125,8 @@ get_last_call_type <- function(expr){
   last_call_type
 }
 
+# extract nested function definitions into named list
+# find_funs(body(bquote))
 find_funs <- function(call){
   env <- new.env()
   env$funs <- list()
@@ -147,6 +153,9 @@ find_funs <- function(call){
   env$funs
 }
 
+
+# when assignin result of if call,
+# swap_calls(quote(x <- if(cond) this else that))
 swap_calls <- function(expr){
   # if not a call return as is
   if (!is.call(expr)) return(expr)
@@ -240,15 +249,17 @@ getS3methodSym <- function(fun, x){
 
 gfn <- getFromNamespace
 
-
+# We might find code that is deparsed into something like foo$!!bar, which is not syntactic
+# if we do, we replace the dollar in `a$b` whenever `b` is not a symbol
+# robust_deparse(quote(`$`(a, !!b) + `$`(a, b)))
+# deparse(quote(`$`(a, !!b) + `$`(a, b)))
 robust_deparse <- function(call) {
   txt <- paste(deparse(call, width.cutoff = 40L, backtick = TRUE), collapse = "\n")
   if (!grepl("\\$!!", txt)) return(txt)
-  # replace
   substitute_bad_dollars <- function(call) {
     if(!is.call(call)) return(call)
     if(length(call) == 3 && identical(call[[1]], quote(`$`))) {
-      if(!is.character(call[[3]])) {
+      if(!is.symbol(call[[3]])) {
         call[[1]] <- as.symbol("$\b")
       }
     }
@@ -275,6 +286,8 @@ get_binding_environment <- function(fun_name, env = parent.frame()) {
   if (identical(env, emptyenv())) {
     stop("Can't find `", fun_name, "`.", call. = FALSE)
   } else if (exists(fun_name, env, inherits = FALSE)) {
+    # Normaly it means we've found the env, but devtools places shims in the
+    # package:: env,
     env
   } else {
     get_binding_environment(fun_name, parent.env(env))
@@ -291,7 +304,10 @@ namespace_name.environment <- function(x, env, ...) {
 }
 
 #' @export
-namespace_name.character <- function(x, env, fallback_ns = NULL, fail_if_not_found = TRUE) {
+namespace_name.character <- function(x, env, fallback_ns = NULL, fail_if_not_found = TRUE, ...) {
+
+  if (identical(x, "::")) return("base")
+  if (identical(x, ":::")) return("base")
 
   if(grepl("::", x)) {
     return(sub("^([^:]+)[:]{1,2}.*", "\\1", x))
@@ -312,6 +328,7 @@ namespace_name.character <- function(x, env, fallback_ns = NULL, fail_if_not_fou
 
   bind_env <- get_binding_environment(x, env)
   bind_env_nm <- environmentName(bind_env)
+
   if(startsWith(bind_env_nm, "imports:")) {
     parent_ns <- sub("^.*?:", "", bind_env_nm)
     imports <- getNamespaceImports(parent_ns)

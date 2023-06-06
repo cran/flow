@@ -41,7 +41,8 @@ globalVariables(c("lhs", "rhs"))
 #' @param refactor If using 'refactor' package, whether to consider original or refactored code
 #' @inheritParams flow_view
 #'
-#' @return Called for side effects
+#' @return `flow_vars()` returns a `"flow_diagram"` object by default, and the output path invisibly if `out` is not
+#' `NULL` (called for side effects).
 #' @export
 #' @examples
 #' flow_view_vars(ave)
@@ -63,7 +64,7 @@ flow_view_vars <- function(x, expand = TRUE, refactor = c("refactored", "origina
   # format dependencies into a data frame containing graph and metadata --------
   df <- flow_view_vars..format_deps(var_deps, fun$name, fun$args, expand)
 
-  # return the data frame, not documented at the moment ------------------------
+  # return the data frame ------------------------------------------------------
   if(identical(out, "data")) {
     return(df)
   }
@@ -71,10 +72,15 @@ flow_view_vars <- function(x, expand = TRUE, refactor = c("refactored", "origina
   # build nomnoml code ---------------------------------------------------------
   nomnoml_code <- flow_view_vars..build_nomnoml_code(df,  fun$name, fun$args)
 
+  # return the code ------------------------------------------------------------
+  if(identical(out, "code")) {
+    return(nomnoml_code)
+  }
+
   # output ---------------------------------------------------------------------
   svg <- is.null(out) || endsWith(out, ".html") || endsWith(out,".html")
-  out <- save_nomnoml(nomnoml_code, svg, out)
-  if(inherits(out, "htmlwidget")) out else invisible(out)
+  out <- save_nomnoml(nomnoml_code, out)
+  if(inherits(out, "htmlwidget")) as_flow_diagram(out, data = df, code = nomnoml_code)  else invisible(out)
 }
 
 flow_view_vars..build_fun <- function(x, x_lng, env) {
@@ -104,6 +110,11 @@ flow_view_vars..clean_body <- function(call, refactor) {
   if(deparse1(call[[1]]) %in% c("quote", "~", "function")) {
     return(NULL)
   }
+
+  if(deparse1(call[[1]]) == "$") {
+    return(call("DOLLAR",call[[2]]))
+  }
+
   if(deparse1(call[[1]]) %in% c(
     "%refactor%", "%refactor_chunk%", "%refactor_value%",
     "%refactor_chunk_and_value%", "%refactor_chunk_efficiently%",
@@ -216,6 +227,7 @@ flow_view_vars..fetch_var_deps <- function(clean_body, fun_name, args) {
         )
         rhs <- do.call(substitute, list(rhs, subst_list))
       }
+
 
       # LHS
       lhs <- call[[2]]

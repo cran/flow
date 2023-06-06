@@ -7,7 +7,7 @@ knitr::opts_chunk$set(
 ## -----------------------------------------------------------------------------
 library(flow)
 
-flow_debugonce(factorial)
+flow_debug(factorial)
 factorial5 <- function(){
   x <- 5L
   factorial(x)

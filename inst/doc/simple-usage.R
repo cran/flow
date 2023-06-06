@@ -7,19 +7,22 @@ knitr::opts_chunk$set(
 ## ----setup--------------------------------------------------------------------
 library(flow)
 
-## -----------------------------------------------------------------------------
-# display a function's body
-flow_view(ave) 
+## ---- eval = FALSE------------------------------------------------------------
+#  # display a function's body
+#  flow_view(ave)
 
-# if non standard evaluation is an issue, use a one element named list
-fun <- ave
-flow_view(list(ave = fun))
+## ---- eval = FALSE------------------------------------------------------------
+#  # if non standard evaluation is an issue, use a one element named list
+#  fun <- ave
+#  flow_view(list(ave = fun))
 
-# display script
-flow_view("../tests/testthat.R")
+## ---- eval = FALSE------------------------------------------------------------
+#  # display script
+#  flow_view("../tests/testthat.R")
 
-# display quoted expression
-flow_view(quote(if(1 + 1 == 2) {"ok"} else {"oh no"}))
+## ---- eval = FALSE------------------------------------------------------------
+#  # display quoted expression
+#  flow_view(quote(if(1 + 1 == 2) {"ok"} else {"oh no"}))
 
 ## ---- eval = FALSE------------------------------------------------------------
 #  # display a function's body

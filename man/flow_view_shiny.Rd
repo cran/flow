@@ -41,14 +41,22 @@ if a regular path is used the format will be guessed from the extension.}
 
 \item{pattern}{A regular expression used to detect ui and server functions}
 }
+\value{
+A flow diagram object.
+}
 \description{
 \ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
+This function displays a shiny app's module structure, assuming it is built
+on top of module functions named a certain way (adjustable through the \code{pattern} argument) and
+calling each other. If you call for instance \code{flow_view_shiny()} on a function that runs the app and
+uses both the main server and ui functions, you'll display the full graph of server and ui modules.
 }
 \details{
-A wrapper around \code{flow_view_deps} which demotes every object that is not
+It is  wrapper around \code{flow_view_deps()} which demotes every object that is not
 a server function, a ui function or a function calling either. What is or isn't considered as a
 server or ui function depends on a regular expression provided through the \code{pattern}
-argument.
+argument. For a more general way of displaying all dependencies (not focused on modules),
+use \code{flow_view_deps()}.
 }
 \examples{
 if (requireNamespace("esquisse", quietly = TRUE)) {
